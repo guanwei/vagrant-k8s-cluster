@@ -1,0 +1,13 @@
+kubernetes:
+  num_nodes: 1
+  master_ip: 192.168.100.21
+  instance_prefix: k8s
+  token: e08460.ce88228cf4f8951c
+  box_name: bento/ubuntu-16.04
+  vm_cpus: 1
+  vm_master_mem: 1024
+  vm_node_mem: 2048
+
+proxies:
+  http: http://192.168.100.1:1080
+  https: http://192.168.100.1:1080
