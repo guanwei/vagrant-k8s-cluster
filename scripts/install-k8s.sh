@@ -81,6 +81,7 @@ k8s_master_up() {
         echo "export KUBECONFIG=/etc/kubernetes/admin.conf" >> /root/.bashrc
     export KUBECONFIG=/etc/kubernetes/admin.conf
 
+    apt-get install -y bash-completion
     tee /etc/profile.d/kube_completion.sh <<-EOF
 source <(kubectl completion bash)
 EOF
