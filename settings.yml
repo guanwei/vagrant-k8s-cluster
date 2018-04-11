@@ -8,6 +8,4 @@ kubernetes:
   vm_master_mem: 1024
   vm_node_mem: 2048
 
-proxies:
-  http: http://192.168.100.1:1080
-  https: http://192.168.100.1:1080
+proxy: http://192.168.100.1:1080

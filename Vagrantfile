@@ -6,7 +6,6 @@ require 'yaml'
 # Read YAML config file
 vagrant_config  = YAML.load_file('settings.yml')
 kubernetes = vagrant_config['kubernetes']
-proxies = vagrant_config['proxies']
 
 # The number of nodes to provision
 num_nodes = (kubernetes['num_nodes'] || 2).to_i
@@ -14,6 +13,9 @@ num_nodes = (kubernetes['num_nodes'] || 2).to_i
 master_ip = kubernetes['master_ip'] || "192.168.100.21"
 node_ips = num_nodes.times.collect { |n| master_ip.gsub(/(\d+\.\d+\.\d+\.)(\d+)/) \
   {$1 + ($2.to_i + n + 1).to_s} }
+# Get proxy and no_proxy
+proxy = vagrant_config['proxy'] || ""
+no_proxy = vagrant_config['no_proxy'] || "127.0.0.1,localhost,#{master_ip},#{node_ips.join(',')}"
 # prefix of vm name
 instance_prefix = kubernetes['instance_prefix'] || "k8s"
 # kubernetes token
@@ -27,7 +29,7 @@ vm_master_mem = (kubernetes['vm_master_mem'] || 1024).to_i
 vm_node_mem = (kubernetes['vm_node_mem'] || 2048).to_i
 
 Vagrant.configure("2") do |config|
-  required_plugins = %w(vagrant-vbguest vagrant-timezone vagrant-proxyconf vagrant-hosts)
+  required_plugins = %w(vagrant-vbguest vagrant-timezone vagrant-hosts)
   plugins_to_install = required_plugins.select { |plugin| not Vagrant.has_plugin? plugin }
   if not plugins_to_install.empty?
     puts "Installing plugins: #{plugins_to_install.join(' ')}"
@@ -39,12 +41,6 @@ Vagrant.configure("2") do |config|
   end
 
   config.timezone.value = :host
-  
-  if Vagrant.has_plugin?("vagrant-proxyconf") then
-    config.proxy.http = proxies['http'] || ""
-    config.proxy.https = proxies['https'] || ""
-    config.proxy.no_proxy = proxies['no_proxy'] || "127.0.0.1,localhost,#{master_ip},#{node_ips.join(',')}"
-  end
 
   if Vagrant.has_plugin?("vagrant-hosts") then
     config.vm.provision :hosts do |provisioner|
@@ -66,14 +62,6 @@ Vagrant.configure("2") do |config|
 
   config.vm.synced_folder ".", "/vagrant", type: "virtualbox"
 
-  config.vm.provision "shell" do |s|
-    ssh_pub_key = File.readlines("#{Dir.home}/.ssh/id_rsa.pub").first.strip
-    s.inline = <<-SHELL
-      mkdir -p /root/.ssh
-      echo #{ssh_pub_key} > /root/.ssh/authorized_keys
-    SHELL
-  end
-
   # Kubernetes master
   master_vm_name = "#{instance_prefix}-master"
 
@@ -87,7 +75,7 @@ Vagrant.configure("2") do |config|
     end
     master.vm.provision "shell" do |s|
       s.path = "scripts/install-k8s.sh"
-      s.args = [ "-s", "master", "-a", "#{master_ip}", "-t", "#{kube_token}" ]
+      s.args = [ "-s", "master", "-a", "#{master_ip}", "-t", "#{kube_token}", "-p", "#{proxy}", "-n", "#{no_proxy}" ]
     end
   end
 
@@ -105,7 +93,7 @@ Vagrant.configure("2") do |config|
       end
       node.vm.provision "shell" do |s|
         s.path = "scripts/install-k8s.sh"
-        s.args = [ "-s", "node", "-a", "#{master_ip}", "-t", "#{kube_token}" ]
+        s.args = [ "-s", "node", "-a", "#{master_ip}", "-t", "#{kube_token}", "-p", "#{proxy}", "-n", "#{no_proxy}" ]
       end
     end
   end

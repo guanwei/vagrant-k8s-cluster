@@ -16,6 +16,8 @@ fi
 enable_net_forward_and_disable_swap() {
     echo "### enable net forward and disable swap..."
     swapoff -a
+    sed -i 's|\[^#\]* swap .*|#&|g' /etc/fstab
+
     cat > /etc/sysctl.d/k8s.conf <<-EOF
 net.bridge.bridge-nf-call-ip6tables = 1
 net.bridge.bridge-nf-call-iptables = 1
@@ -25,6 +27,15 @@ EOF
     modprobe br_netfilter
     sysctl -p /etc/sysctl.d/k8s.conf
     free -m
+}
+
+set_proxy() {
+    tee /etc/profile.d/proxy.sh <<-EOF
+export http_proxy=$PROXY
+export https_proxy=$PROXY
+export no_proxy=$NO_PROXY
+EOF
+  source /etc/profile.d/proxy.sh
 }
 
 install_docker_on_ubuntu() {
@@ -45,13 +56,14 @@ EOF
     grep -q '^ExecStartPost=' /lib/systemd/system/docker.service &&
         sed -i 's|^ExecStartPost=.*|ExecStartPost=/sbin/iptables -P FORWARD ACCEPT|g' /lib/systemd/system/docker.service ||
         sed -i '/ExecStart=.*/aExecStartPost=/sbin/iptables -P FORWARD ACCEPT' /lib/systemd/system/docker.service
+    
     # Set docker proxy
     mkdir -p /etc/systemd/system/docker.service.d
     tee /etc/systemd/system/docker.service.d/proxy.conf <<-EOF
 [Service]
 Environment="http_proxy=$http_proxy"
 Environment="https_proxy=$https_proxy"
-Environment="no_proxy=127.0.0.1,localhost"
+Environment="no_proxy=$no_proxy"
 EOF
     systemctl daemon-reload
     systemctl restart docker
@@ -66,6 +78,13 @@ install_kube_tools_on_ubuntu() {
 deb http://apt.kubernetes.io/ kubernetes-xenial main
 EOF
     apt-get update && apt-get install -y kubelet kubeadm kubectl
+
+    # set fail-swap-on=false for kubelet service
+    grep -q "^Environment=\"KUBELET_EXTRA_ARGS=" /etc/systemd/system/kubelet.service.d/10-kubeadm.conf &&
+        sed -i "s|^Environment=\"KUBELET_EXTRA_ARGS=.*|Environment=\"KUBELET_EXTRA_ARGS=--fail-swap-on=false\"|g" /etc/systemd/system/kubelet.service.d/10-kubeadm.conf ||
+        echo "Environment=\"KUBELET_EXTRA_ARGS=--fail-swap-on=false\"" >> /etc/systemd/system/kubelet.service.d/10-kubeadm.conf
+    systemctl daemon-reload
+    systemctl restart kubelet
 }
 
 k8s_master_up() {
@@ -108,6 +127,7 @@ k8s_node_up() {
 
 install_k8s_on_ubuntu() {
     enable_net_forward_and_disable_swap
+    set_proxy
     install_docker_on_ubuntu
     install_kube_tools_on_ubuntu
     case "$SERVER_TYPE" in
@@ -124,10 +144,12 @@ print_usage() {
     echo "  [-s|--server] <master|node>     Set k8s server type"
     echo "  [-a|--apiserver] <ip>           Set k8s api server ip"
     echo "  [-t|--token] <token>            Set k8s cluster token"
+    echo "  [-p|--proxy] <proxy>            Set proxy for server"
+    echo "  [-n|--no-proxy] <no_proxy>      Set no proxy for server"
 }
 
 # read the options
-temp=`getopt -o hs:a:t: --long help,server:,apiserver:token: -n $(basename "$0") -- "$@"`
+temp=`getopt -o hs:a:t:p:n: --long help,server:,apiserver:token:proxy:no-proxy: -n $(basename "$0") -- "$@"`
 if [ $? != 0 ]; then echo "terminating..." >&2 ; exit 1 ; fi
 eval set -- "$temp"
 
@@ -138,6 +160,8 @@ while true; do
         -s|--server) SERVER_TYPE=$2 ; shift 2 ;;
         -a|--apiserver) APISERVER_IP=$2 ; shift 2 ;;
         -t|--token) KUBE_TOKEN=$2 ; shift 2 ;;
+        -p|--proxy) PROXY=$2 ; shift 2 ;;
+        -n|--no-proxy) NO_PROXY=$2 ; shift 2 ;;
         --) shift ; break ;;
         *) echo "internal error!" ; exit 1 ;;
     esac
