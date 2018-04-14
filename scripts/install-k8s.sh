@@ -87,6 +87,12 @@ EOF
     systemctl restart kubelet
 }
 
+install_k8s_python_client_on_ubuntu() {
+    apt-get update && apt install -y python3-pip
+    pip3 install --upgrade pip
+    pip3 install kubernetes
+}
+
 k8s_master_up() {
     echo "### set up k8s master..."
     kubeadm init --token $KUBE_TOKEN --token-ttl 0 --pod-network-cidr=10.244.0.0/16 --apiserver-advertise-address=$APISERVER_IP
@@ -115,6 +121,23 @@ EOF
         - --iface='$iface /data/k8s/flannel/kube-flannel.yml
     kubectl create -f /data/k8s/flannel/kube-flannel.yml
 
+    # 部署 Ingress controller
+    mkdir -p /data/k8s/ingress-nginx
+    curl -fsSL https://raw.githubusercontent.com/kubernetes/ingress-nginx/master/deploy/namespace.yaml -o /data/k8s/ingress-nginx/namespace.yaml
+    curl -fsSL https://raw.githubusercontent.com/kubernetes/ingress-nginx/master/deploy/default-backend.yaml -o /data/k8s/ingress-nginx/default-backend.yaml
+    curl -fsSL https://raw.githubusercontent.com/kubernetes/ingress-nginx/master/deploy/configmap.yaml -o /data/k8s/ingress-nginx/configmap.yaml
+    curl -fsSL https://raw.githubusercontent.com/kubernetes/ingress-nginx/master/deploy/tcp-services-configmap.yaml -o /data/k8s/ingress-nginx/tcp-services-configmap.yaml
+    curl -fsSL https://raw.githubusercontent.com/kubernetes/ingress-nginx/master/deploy/udp-services-configmap.yaml -o /data/k8s/ingress-nginx/udp-services-configmap.yaml
+    curl -fsSL https://raw.githubusercontent.com/kubernetes/ingress-nginx/master/deploy/rbac.yaml -o /data/k8s/ingress-nginx/rbac.yaml
+    curl -fsSL https://raw.githubusercontent.com/kubernetes/ingress-nginx/master/deploy/with-rbac.yaml -o /data/k8s/ingress-nginx/with-rbac.yaml
+    grep -q '^\s*hostNetwork: ' /data/k8s/ingress-nginx/with-rbac.yaml &&
+        sed -i "s|^\(\s*\)hostNetwork:.*|\1hostNetwork: true|g" /data/k8s/ingress-nginx/with-rbac.yaml ||
+        sed -i '/^\(\s*\)containers:/i \
+      hostNetwork: true' /data/k8s/ingress-nginx/with-rbac.yaml
+    for yamlfile in namespace.yaml default-backend.yaml configmap.yaml tcp-services-configmap.yaml udp-services-configmap.yaml rbac.yaml with-rbac.yaml; do
+        kubectl create -f /data/k8s/ingress-nginx/$yamlfile
+    done
+
     kubectl cluster-info
     kubectl get cs
     kubectl get pods --all-namespaces
@@ -130,6 +153,7 @@ install_k8s_on_ubuntu() {
     set_proxy
     install_docker_on_ubuntu
     install_kube_tools_on_ubuntu
+    install_k8s_python_client_on_ubuntu
     case "$SERVER_TYPE" in
         master) k8s_master_up ;;
         node) k8s_node_up ;;
